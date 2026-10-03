@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NFL Predictor</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+ margin:0;
+ background:#0b1020;
+ color:#fff;
+ font-family:Arial,sans-serif
+}
+
+.container{
+ max-width:650px;
+ margin:auto;
+ padding:20px
+}
+
+h1{text-align:center;margin-bottom:5px}
+.sub{text-align:center;color:#9ca3af;margin-bottom:25px}
+
+.card{
+ background:#151c31;
+ border-radius:16px;
+ padding:20px;
+ margin-bottom:18px
+}
+
+label{
+ display:block;
+ color:#cbd5e1;
+ margin-bottom:7px
+}
+
+input{
+ width:100%;
+ padding:14px;
+ margin-bottom:15px;
+ border-radius:10px;
+ border:1px solid #374151;
+ background:#0f172a;
+ color:#fff;
+ font-size:16px
+}
+
+button{
+ width:100%;
+ padding:15px;
+ border:0;
+ border-radius:10px;
+ background:#2563eb;
+ color:#fff;
+ font-size:17px;
+ font-weight:bold
+}
+
+.loading{
+ display:none;
+ text-align:center;
+ color:#60a5fa;
+ margin-top:15px
+}
+
+.error{
+ display:none;
+ text-align:center;
+ color:#f87171;
+ margin-top:15px
+}
+
+.result{display:none}
+
+.matchup{
+ text-align:center;
+ font-size:22px;
+ font-weight:bold
+}
+
+.pick{
+ text-align:center;
+ font-size:25px;
+ font-weight:bold;
+ margin:15px 0
+}
+
+.stat{
+ display:flex;
+ justify-content:space-between;
+ padding:9px 0;
+ border-bottom:1px solid #293247
+}
+
+.stat:last-child{border-bottom:0}
+
+.value{font-weight:bold}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🏈 NFL PREDICTOR</h1>
+
+<div class="sub">
+Modelo matemático • Datos automáticos
+</div>
+
+<div class="card">
+
+<label>Equipo local</label>
+<input id="home" placeholder="Ej. Bills">
+
+<label>Equipo visitante</label>
+<input id="away" placeholder="Ej. Chiefs">
+
+<button onclick="analizar()">
+ANALIZAR PARTIDO
+</button>
+
+<div id="loading" class="loading">
+⏳ Consultando datos NFL...
+</div>
+
+<div id="error" class="error"></div>
+
+</div>
+
+<div id="result" class="result">
+
+<div class="card">
+
+<div id="matchup" class="matchup"></div>
+
+<div id="pick" class="pick"></div>
+
+</div>
+
+
+<div class="card">
+
+<h3>📊 Probabilidades</h3>
+
+<div class="stat">
+<span>Local ML</span>
+<span id="homeML" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Visitante ML</span>
+<span id="awayML" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Over</span>
+<span id="over" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Under</span>
+<span id="under" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Local -1.5</span>
+<span id="homeSpread" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Visitante +1.5</span>
+<span id="awaySpread" class="value"></span>
+</div>
+
+</div>
+
+
+<div class="card">
+
+<h3>🏈 Proyección de puntos</h3>
+
+<div class="stat">
+<span>Local</span>
+<span id="homePoints" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Visitante</span>
+<span id="awayPoints" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Total proyectado</span>
+<span id="total" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Línea calculada</span>
+<span id="line" class="value"></span>
+</div>
+
+</div>
+
+
+<div class="card">
+
+<h3>📈 Datos utilizados</h3>
+
+<div class="stat">
+<span>Local PF/Juego</span>
+<span id="homePF" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Local PA/Juego</span>
+<span id="homePA" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Visitante PF/Juego</span>
+<span id="awayPF" class="value"></span>
+</div>
+
+<div class="stat">
+<span>Visitante PA/Juego</span>
+<span id="awayPA" class="value"></span>
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+
+<script>
+
+/*
+ NFL Predictor
+ Obtiene partidos recientes mediante ESPN API.
+
+ Nota:
+ ESPN es utilizado aquí como fuente pública de datos.
+*/
+
+
+const API =
+"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+
+
+function pct(x){
+ return (x*100).toFixed(1)+"%";
+}
+
+
+function normalCDF(x,mean,sd){
+
+ let z=(x-mean)/sd;
+
+ let t=1/(1+0.2316419*Math.abs(z));
+
+ let d=
+ 0.3989423*Math.exp(-z*z/2);
+
+ let p=
+ d*t*
+ (
+ 0.3193815+
+  t*(
+   -0.3565638+
+   t*(
+    1.781478+
+    t*(
+     -1.821256+
+     t*1.330274
+    )
+   )
+  )
+ );
+
+ if(z>0)p=1-p;
+
+ return p;
+}
+
+
+/*
+ Obtener nombre corto del equipo
+*/
+
+function normalize(str){
+
+ return str
+ .toLowerCase()
+ .replace(/[^a-z0-9]/g,"");
+}
+
+
+/*
+ Obtener temporada regular reciente
+*/
+
+async function getGames(){
+
+ const response =
+ await fetch(API);
+
+ if(!response.ok)
+  throw new Error("No se pudieron obtener los partidos NFL.");
+
+ return await response.json();
+}
+
+
+/*
+ Buscar equipo en los partidos disponibles
+*/
+
+function findTeam(games,name){
+
+ const search=normalize(name);
+
+ for(const event of games){
+
+  const competitions=
+  event.competitions || [];
+
+  for(const game of competitions){
+
+   for(const competitor of game.competitors || []){
+
+    const team=competitor.team;
+
+    if(!team)continue;
+
+    const options=[
+     team.displayName,
+     team.shortDisplayName,
+     team.name,
+     team.abbreviation,
+     team.location
+    ];
+
+    for(const option of options){
+
+     if(
+      normalize(option)===search ||
+      normalize(option).includes(search) ||
+      search.includes(normalize(option))
+     ){
+      return team;
+     }
+
+    }
+
+   }
+
+  }
+
+ }
+
+ return null;
+}
+
+
+/*
+ Obtener resultados históricos
+*/
+
+async function getTeamHistory(teamId){
+
+ let games=[];
+
+ /*
+ ESPN permite consultar temporadas anteriores.
+ */
+
+ const today=new Date();
+
+ for(let i=0;i<70;i+=7){
+
+  const d=
+  new Date(
+   today.getTime()-
+   i*24*60*60*1000
+  );
+
+  const date=
+   d.toISOString()
+   .slice(0,10)
+   .replaceAll("-","");
+
+  const url=
+   API+
+   "?dates="+date+
+   "&limit=100";
+
+  try{
+
+   const response=
+   await fetch(url);
+
+   const data=
+   await response.json();
+
+   for(const event of data.events || []){
+
+    const comp=
+    event.competitions?.[0];
+
+    if(!comp)continue;
+
+    if(event.status?.type?.completed!==true)
+     continue;
+
+    const team=
+    comp.competitors?.find(
+     x=>x.team?.id===teamId
+    );
+
+    if(!team)continue;
+
+    const opponent=
+    comp.competitors?.find(
+     x=>x.team?.id!==teamId
+    );
+
+    if(!opponent)continue;
+
+    games.push({
+
+     date:event.date,
+
+     pointsFor:
+      Number(team.score)||0,
+
+     pointsAgainst:
+      Number(opponent.score)||0,
+
+     home:
+      team.homeAway==="home",
+
+     opponent:
+      opponent.team.displayName
+
+    });
+
+   }
+
+  }catch(e){}
+
+ }
+
+ /*
+ eliminar duplicados
+ */
+
+ const unique=[];
+
+ const seen=new Set();
+
+ for(const g of games){
+
+  const key=
+   g.date+
+   g.opponent+
+   g.pointsFor;
+
+  if(!seen.has(key)){
+
+   seen.add(key);
+   unique.push(g);
+
+  }
+
+ }
+
+ unique.sort(
+  (a,b)=>
+   new Date(b.date)-
+   new Date(a.date)
+ );
+
+ return unique.slice(0,10);
+}
+
+
+/*
+ Analizar
+*/
+
+async function analizar(){
+
+ const homeInput=
+ document.getElementById("home").value.trim();
+
+ const awayInput=
+ document.getElementById("away").value.trim();
+
+ const error=
+ document.getElementById("error");
+
+ const loading=
+ document.getElementById("loading");
+
+ const result=
+ document.getElementById("result");
+
+ error.style.display="none";
+ result.style.display="none";
+
+ if(!homeInput || !awayInput){
+
+  error.innerText=
+   "Escribe los dos equipos.";
+
+  error.style.display="block";
+
+  return;
+ }
+
+ loading.style.display="block";
+
+ try{
+
+  const data=
+   await getGames();
+
+  const home=
+   findTeam(data.events||[],homeInput);
+
+  const away=
+   findTeam(data.events||[],awayInput);
+
+  if(!home)
+   throw new Error(
+    "No encontré el equipo local. Prueba con su nombre o abreviación."
+   );
+
+  if(!away)
+   throw new Error(
+    "No encontré el equipo visitante. Prueba con su nombre o abreviación."
+   );
+
+
+  /*
+   Historial
+  */
+
+  const homeGames=
+   await getTeamHistory(home.id);
+
+  const awayGames=
+   await getTeamHistory(away.id);
+
+
+  if(homeGames.length<3 ||
+     awayGames.length<3){
+
+   throw new Error(
+    "Todavía no hay suficientes partidos recientes disponibles."
+   );
+
+  }
+
+
+  /*
+   Últimos 10
+  */
+
+  function average(arr,key){
+
+   if(!arr.length)return 0;
+
+   return arr.reduce(
+    (sum,x)=>sum+x[key],0
+   )/arr.length;
+
+  }
+
+
+  const homePF=
+   average(homeGames,"pointsFor");
+
+  const homePA=
+   average(homeGames,"pointsAgainst");
+
+  const awayPF=
+   average(awayGames,"pointsFor");
+
+  const awayPA=
+   average(awayGames,"pointsAgainst");
+
+
+  /*
+   Fuerza ofensiva/defensiva
+
+   Proyección:
+   ataque local + defensa visitante
+   ataque visitante + defensa local
+  */
+
+  const homeExpected=
+   (homePF+awayPA)/2;
+
+  const awayExpected=
+   (awayPF+homePA)/2;
+
+
+  const total=
+   homeExpected+awayExpected;
+
+
+  /*
+   Ventaja de local
+
+   Aproximación de +1.5 puntos
+  */
+
+  const homeAdj=
+   homeExpected+1.5;
+
+  const awayAdj=
+   awayExpected;
+
+
+  /*
+   Diferencial
+  */
+
+  const differential=
+   homeAdj-awayAdj;
+
+
+  /*
+   Probabilidad ML mediante
+   diferencia de puntos.
+
+   SD aproximada NFL.
+  */
+
+  const sd=13.5;
+
+  let homeML=
+   1-normalCDF(
+    0,
+    differential,
+    sd
+   );
+
+  let awayML=
+   1-homeML;
+
+
+  /*
+   Over / Under
+
+   Línea calculada al .5
+  */
+
+  const line=
+   Math.round(total*2)/2;
+
+
+  const totalSD=13.5;
+
+  const under=
+   normalCDF(
+    line,
+    total,
+    totalSD
+   );
+
+  const over=
+   1-under;
+
+
+  /*
+   Spread -1.5
+  */
+
+  const spreadSD=13.5;
+
+  const homeMinus15=
+   1-normalCDF(
+    1.5,
+    differential,
+    spreadSD
+   );
+
+  const awayPlus15=
+   1-homeMinus15;
+
+
+  /*
+   Elegir mayor probabilidad
+  */
+
+  const options=[
+
+   {
+    name:home.displayName+" ML",
+    value:homeML
+   },
+
+   {
+    name:away.displayName+" ML",
+    value:awayML
+   },
+
+   {
+    name:"OVER "+line,
+    value:over
+   },
+
+   {
+    name:"UNDER "+line,
+    value:under
+   },
+
+   {
+    name:home.displayName+" -1.5",
+    value:homeMinus15
+   },
+
+   {
+    name:away.displayName+" +1.5",
+    value:awayPlus15
+   }
+
+  ];
+
+
+  options.sort(
+   (a,b)=>b.value-a.value
+  );
+
+
+  const best=
+   options[0];
+
+
+  /*
+   Mostrar
+  */
+
+  document.getElementById("matchup")
+   .innerText=
+   home.displayName+
+   " vs "+
+   away.displayName;
+
+
+  document.getElementById("pick")
+   .innerText=
+   "🔥 "+best.name+
+   " — "+pct(best.value);
+
+
+  document.getElementById("homeML")
+   .innerText=pct(homeML);
+
+  document.getElementById("awayML")
+   .innerText=pct(awayML);
+
+  document.getElementById("over")
+   .innerText=pct(over);
+
+  document.getElementById("under")
+   .innerText=pct(under);
+
+  document.getElementById("homeSpread")
+   .innerText=pct(homeMinus15);
+
+  document.getElementById("awaySpread")
+   .innerText=pct(awayPlus15);
+
+
+  document.getElementById("homePoints")
+   .innerText=
+   homeExpected.toFixed(1);
+
+  document.getElementById("awayPoints")
+   .innerText=
+   awayExpected.toFixed(1);
+
+  document.getElementById("total")
+   .innerText=
+   total.toFixed(1);
+
+  document.getElementById("line")
+   .innerText=
+   line;
+
+
+  document.getElementById("homePF")
+   .innerText=
+   homePF.toFixed(1);
+
+  document.getElementById("homePA")
+   .innerText=
+   homePA.toFixed(1);
+
+  document.getElementById("awayPF")
+   .innerText=
+   awayPF.toFixed(1);
+
+  document.getElementById("awayPA")
+   .innerText=
+   awayPA.toFixed(1);
+
+
+  result.style.display="block";
+
+
+ }catch(e){
+
+  error.innerText=
+   "Error: "+e.message;
+
+  error.style.display="block";
+
+ }
+
+ loading.style.display="none";
+
+}
+
+</script>
+
+</body>
+</html>
